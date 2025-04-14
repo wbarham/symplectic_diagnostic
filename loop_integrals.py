@@ -28,8 +28,8 @@ class LoopIntegral:
         Compute the loop integral ∑ p * dq/dtheta scaled by dtheta.
 
         Parameters:
-        - p (np.ndarray): Array of shape (D, N) 
-        - q (np.ndarray): Array of shape (D, N) 
+        - p (np.ndarray): Array of shape (D, N) where D is the dimension of the system
+        - q (np.ndarray): Array of shape (D, N) where D is the dimension of the system
 
         Returns:
         - loop_integral (float): Value of loop integral
