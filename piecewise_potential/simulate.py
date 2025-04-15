@@ -59,7 +59,7 @@ def main():
     parser.add_argument('--p0', type=float, default=0.5, help='Initial p momentum')
     parser.add_argument('--rad', type=float, default=1.0, help='Initial radius')
     parser.add_argument('--M', type=int, default=1024, help='Number of trajectories')
-    parser.add_argument('--dq', type=float, default=0.1, help='Interpolation grid size')
+    parser.add_argument('--dq', type=float, default=0.01, help='Interpolation grid size')
     parser.add_argument('--interpolation_order', type=int, default=2, help='Interpolation order')
     parser.add_argument('--dt', type=float, default=0.1, help='Time step size')
     args = parser.parse_args()
