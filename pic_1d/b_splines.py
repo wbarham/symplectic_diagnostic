@@ -37,7 +37,7 @@ def p2g_B1(pos, vec, dx):
         vec[idx1] += w1
 
 @nb.njit(parallel=True)
-def p2g_B1_par(pos, vec, dx, Nx):
+def p2g_B1_par(pos, vec, dx):
     """
     Computes grid indices and weights for charge deposition
     using linear B-splines using threading.
@@ -496,6 +496,17 @@ def construct_laplacian(L, Nx, order):
 
     return Lap
 
+def binary_filter(Nx):
+
+    B = sp.lil_matrix((Nx, Nx))
+    for i in range(Nx):
+        B[i, i] = 1/2
+        B[i, (i + 1) % Nx] = 1/4
+        B[i, (i - 1) % Nx] = 1/4
+    B = B.tocsr()
+
+    return B
+
 """
 TESTS
 """
@@ -536,7 +547,7 @@ def test_p2g_deposition(order, serial=True, plotting=False):
             p2g_B3(pos, grid, dx)
     else:
         if order == 1:
-            p2g_B1_par(pos, grid, dx, Nx)
+            p2g_B1_par(pos, grid, dx)
         elif order == 2:
             p2g_B2_par(pos, grid, dx)
         elif order == 3:
@@ -632,11 +643,11 @@ def test_full_force_calculation(order, serial=True, plotting=False):
     #================
     # Problem set up
     
-    L  = 1.0
+    L  = 10.0
     A  = 0.75
     Nx = 101
     dx = L / Nx
-    x_grid = np.linspace(0, 1, Nx, endpoint=False)
+    x_grid = np.linspace(0, L, Nx, endpoint=False)
 
     #================
     # Generate particles
@@ -671,7 +682,7 @@ def test_full_force_calculation(order, serial=True, plotting=False):
             p2g_B3(pos, charge, dx)
     else:
         if order == 1:
-            p2g_B1_par(pos, charge, dx, Nx)
+            p2g_B1_par(pos, charge, dx)
         elif order == 2:
             p2g_B2_par(pos, charge, dx)
         elif order == 3:
@@ -766,6 +777,7 @@ def test_full_force_calculation(order, serial=True, plotting=False):
         plt.show()
 
 if __name__ == "__main__":
+    """
     test_p2g_deposition(1)
     test_p2g_deposition(1, serial=False)
     test_p2g_deposition(2)
@@ -778,6 +790,7 @@ if __name__ == "__main__":
     test_g2p_derivatives(2, serial=False)
     test_g2p_derivatives(3)
     test_g2p_derivatives(3, serial=False)
+    """
     test_full_force_calculation(1)
     test_full_force_calculation(1, serial=False)
     test_full_force_calculation(2)
