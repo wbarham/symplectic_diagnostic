@@ -15,7 +15,7 @@ mkdir -p simulation_results
 
 # Generate timestamp for unique filename
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-OUTPUT_FILE="simulation_results/sweep_results_M_${TIMESTAMP}.txt"
+OUTPUT_FILE="simulation_results/sweep_results_M_${TIMESTAMP}_ORDER_${INTERP_ORDER}.txt"
 
 # Header for the output file
 echo "=== Parameter Sweep Results ===" > $OUTPUT_FILE
@@ -24,13 +24,13 @@ echo "Sweeping M from 2^4 to 2^16" >> $OUTPUT_FILE
 echo "==============================" >> $OUTPUT_FILE
 
 # Loop over dt values
-for i in {4..16}; do
+for i in {4..20}; do
     M=$(awk "BEGIN {print 2^$i}")
     echo "Running simulation with M = $M (2^$i)"
     
     # Run simulation and append to output file
     echo -e "\n=== M = $M ===" >> $OUTPUT_FILE
-    python simulate.py --M $M --dt $DT --interp_order $INTERP_ORDER >> $OUTPUT_FILE
+    python simulate.py --M $M --dt $DT --interpolation_order $INTERP_ORDER >> $OUTPUT_FILE
     
     # Progress indicator
     echo "Completed M = 2^$i"

@@ -32,6 +32,9 @@ def run_simulation(params):
     # Compute initial integrals
     init_symp = loop_integral.compute(q_symp, p_symp)
     init_rk2 = loop_integral.compute(q_rk2, p_rk2)
+
+    # Exact integral
+    exact_integral = 0.5 * params['rad']**2
     
     # Single step integration
     strang_step_batch(q_symp, p_symp, params['dt'], 
@@ -44,8 +47,10 @@ def run_simulation(params):
     final_rk2 = loop_integral.compute(q_rk2, p_rk2)
     
     # Calculate relative errors
-    rel_err_symp = np.abs((final_symp - init_symp) / (np.abs(init_symp)))
-    rel_err_rk2 = np.abs((final_rk2 - init_rk2) / (np.abs(init_rk2)))
+    #rel_err_symp = np.abs((final_symp - init_symp) / (np.abs(init_symp)))
+    #rel_err_rk2 = np.abs((final_rk2 - init_rk2) / (np.abs(init_rk2)))
+    rel_err_symp = np.abs((final_symp - exact_integral) / (np.abs(exact_integral)))
+    rel_err_rk2 = np.abs((final_rk2 - exact_integral) / (np.abs(exact_integral)))
     
     return {
         'rel_err_symp': rel_err_symp,
@@ -56,12 +61,12 @@ def run_simulation(params):
 def main():
     parser = argparse.ArgumentParser(description='Single-step interpolated pendulum simulation')
     parser.add_argument('--q0', type=float, default=np.pi, help='Initial q position')
-    parser.add_argument('--p0', type=float, default=0.5, help='Initial p momentum')
+    parser.add_argument('--p0', type=float, default=0.0, help='Initial p momentum')
     parser.add_argument('--rad', type=float, default=1.0, help='Initial radius')
     parser.add_argument('--M', type=int, default=1024, help='Number of trajectories')
-    parser.add_argument('--dq', type=float, default=0.01, help='Interpolation grid size')
+    parser.add_argument('--dq', type=float, default=0.5, help='Interpolation grid size')
     parser.add_argument('--interpolation_order', type=int, default=2, help='Interpolation order')
-    parser.add_argument('--dt', type=float, default=0.1, help='Time step size')
+    parser.add_argument('--dt', type=float, default=0.25, help='Time step size')
     args = parser.parse_args()
     
     # Convert args to dict

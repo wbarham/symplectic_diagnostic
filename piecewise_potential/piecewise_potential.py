@@ -6,6 +6,112 @@ from typing import Tuple
 V = np.sin
 dVdq = np.cos
 
+@njit
+def potential_bspline(q, dq, order):
+    """
+    Evaluate potential at point q using cardinal B-spline interpolation.
+
+    Args:
+        q: Position at which to evaluate the potential.
+        phi_grid: 1D array of potential values on the grid.
+        order: Order of B-spline (1: linear, 2: quadratic, 3: cubic).
+        Nx: Number of grid points.
+        L: Length of the domain.
+
+    Returns:
+        Interpolated potential at q.
+    """
+
+    if order == 0 or dq == 0:
+        return V(q)
+    
+    q_grid_idx = int(np.floor(q / dq))
+    q_grid_frac = (q - q_grid_idx * dq) / dq
+    
+    if order == 1:
+        # Linear interpolation
+        w0 = 1 - q_grid_frac
+        w1 = q_grid_frac
+        return w0 * V(q_grid_idx * dq) + w1 * V((q_grid_idx + 1) * dq)
+
+    elif order == 2:
+        # Quadratic B-spline (3-point stencil)
+        w0 = 0.5 * (1.0 - q_grid_frac)**2
+        w1 = 0.5 * (-2.0 * q_grid_frac**2 + 2.0 * q_grid_frac + 1.0)
+        w2 = 0.5 * q_grid_frac**2
+
+        q_grid_idx +=0.5 # Quadratic B-spline grid is offset by half a grid point
+        return (w0 * V((q_grid_idx - 1) * dq) + 
+                w1 * V(q_grid_idx * dq) + 
+                w2 * V((q_grid_idx + 1) * dq))
+
+    elif order == 3:
+        # Cubic B-spline (4-point stencil)
+        w0 = (1.0 / 6.0) * (1.0 - q_grid_frac)**3
+        w1 = (1.0 / 6.0) * (3.0 * q_grid_frac**3 - 6.0 * q_grid_frac**2 + 4.0)
+        w2 = (1.0 / 6.0) * (-3.0 * q_grid_frac**3 + 3.0 * q_grid_frac**2 + 3.0 * q_grid_frac + 1.0)
+        w3 = (1.0 / 6.0) * q_grid_frac**3
+        return (w0 * V((q_grid_idx - 1) * dq) +
+                w1 * V(q_grid_idx * dq) +
+                w2 * V((q_grid_idx + 1) * dq) +
+                w3 * V((q_grid_idx + 2) * dq))
+
+    else:
+        raise ValueError("Unsupported B-spline order")
+
+@njit
+def potential_bspline_derivative(q, dq, order):
+    """
+    Evaluate the derivative of the potential at position q using
+    cardinal B-spline interpolation.
+
+    Args:
+        q: Position at which to evaluate the derivative.
+        dq: Grid spacing.
+        order: Order of B-spline interpolation (1: linear, 2: quadratic, 3: cubic).
+
+    Returns:
+        Interpolated derivative of the potential at q.
+    """
+
+    if order == 0 or dq == 0:
+        return dVdq(q)
+
+    q_grid_idx = int(np.floor(q / dq))
+    q_grid_frac = (q - q_grid_idx * dq) / dq
+
+    if order == 1:
+        # Linear B-spline derivative
+        dw0 = -1 / dq
+        dw1 = 1 / dq
+        return dw0 * V(q_grid_idx * dq) + dw1 * V((q_grid_idx + 1) * dq)
+
+    elif order == 2:
+        # Derivatives of quadratic B-spline weights
+        dw0 = -(1.0 - q_grid_frac) / dq
+        dw1 = (-2.0 * q_grid_frac + 1.0) / dq
+        dw2 = q_grid_frac / dq
+        
+        q_grid_idx +=0.5 # Quadratic B-spline grid is offset by half a grid point
+        return (dw0 * V((q_grid_idx - 1) * dq) + 
+                dw1 * V(q_grid_idx * dq) + 
+                dw2 * V((q_grid_idx + 1) * dq))
+
+    elif order == 3:
+        # Derivatives of cubic B-spline weights
+        dw0 = -0.5 * (1 - q_grid_frac)**2 / dq
+        dw1 = 0.5 * (3 * q_grid_frac**2 - 4 * q_grid_frac) / dq
+        dw2 = 0.5 * (-3 * q_grid_frac**2 + 2 * q_grid_frac + 1) / dq
+        dw3 = 0.5 * q_grid_frac**2 / dq
+
+        return (dw0 * V((q_grid_idx - 1) * dq) +
+                dw1 * V((q_grid_idx) * dq) +
+                dw2 * V((q_grid_idx + 1) * dq) +
+                dw3 * V((q_grid_idx + 2) * dq))
+
+    else:
+        raise ValueError("Unsupported B-spline order")
+
 # Core single-point computations (serial)
 @njit
 def compute_potential(q: float, dq: float, interpolation_order: int) -> float:
@@ -90,8 +196,8 @@ def kinetic_update(q: float, p: float, dt: float) -> Tuple[float, float]:
 def potential_update(q: float, p: float, dt: float, 
                    dq: float, interpolation_order: int) -> Tuple[float, float]:
     """Update single point using potential part"""
-    F_q = compute_force(q, dq, interpolation_order)
-    return q, p + F_q * dt
+    dVdq = potential_bspline_derivative(q, dq, interpolation_order)
+    return q, p - dVdq * dt
 
 # Parallelized time steppers
 @njit(parallel=True)
@@ -126,7 +232,7 @@ def compute_energy(q: np.ndarray, p: np.ndarray, H: np.ndarray,
                    dq: float, interpolation_order: int):
 
     for i in prange(q.shape[0]):
-        Vi = compute_potential(q[i], dq, interpolation_order)
+        Vi = potential_bspline(q[i], dq, interpolation_order)
         H[i] = 0.5 * p[i]**2 + Vi
 
 @njit
@@ -189,6 +295,48 @@ def compute_trajectories_batch(q_init: np.ndarray, p_init: np.ndarray,
     
     return q_traj, p_traj, energy
 
+def plot_bspline_interpolation(order: int, dq: float, domain=(0, 2 * np.pi), num_points=1000):
+    import matplotlib.pyplot as plt
+
+    # Evaluation points
+    q_vals = np.linspace(domain[0], domain[1], num_points)
+    
+    # Interpolated and exact values
+    V_interp = np.array([potential_bspline(q, dq, order) for q in q_vals])
+    dV_interp = np.array([potential_bspline_derivative(q, dq, order) for q in q_vals])
+    V_exact = V(q_vals)
+    dV_exact = dVdq(q_vals)
+    
+    # Compute L2 errors
+    V_error = np.sqrt(np.mean((V_interp - V_exact) ** 2))
+    dV_error = np.sqrt(np.mean((dV_interp - dV_exact) ** 2))
+
+    print(f"Interpolation order: {order}")
+    print(f"L2 error in potential     = {V_error:.3e}")
+    print(f"L2 error in force (dV/dq) = {dV_error:.3e}")
+
+    # Plotting
+    plt.figure(figsize=(12, 5))
+
+    plt.subplot(1, 2, 1)
+    plt.plot(q_vals, V_exact, label="Exact V(q)", color="black", linewidth=2)
+    plt.plot(q_vals, V_interp, label=f"Interpolated V(q) (order={order})", linestyle="--")
+    plt.xlabel("q")
+    plt.ylabel("Potential V(q)")
+    plt.title("Potential Comparison")
+    plt.legend()
+
+    plt.subplot(1, 2, 2)
+    plt.plot(q_vals, dV_exact, label="Exact dV/dq", color="black", linewidth=2)
+    plt.plot(q_vals, dV_interp, label=f"Interpolated dV/dq (order={order})", linestyle="--")
+    plt.xlabel("q")
+    plt.ylabel("Force dV/dq")
+    plt.title("Force Comparison")
+    plt.legend()
+
+    plt.tight_layout()
+    plt.show()
+
 # Example usage
 def main():
     # Simulation parameters
@@ -197,7 +345,7 @@ def main():
     num_trajectories = 5      # Fewer trajectories for clearer visualization
     dt = 0.01                 # Time step
     num_steps = 500          # Number of steps
-    dq = 0.1                 # Coarse-graining spacing
+    dq = 0.25                 # Coarse-graining spacing
     method = "strang"        # Integration method ("strang" or "rk2")
     
     # Initial conditions (circular in phase space)
@@ -285,3 +433,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+    plot_bspline_interpolation(order=1, dq=0.1)  # You can change order and dq as needed
+    plot_bspline_interpolation(order=2, dq=0.1)  # You can change order and dq as needed
+    plot_bspline_interpolation(order=3, dq=0.1)  # You can change order and dq as needed

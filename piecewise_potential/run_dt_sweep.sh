@@ -15,7 +15,7 @@ mkdir -p simulation_results
 
 # Generate timestamp for unique filename
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-OUTPUT_FILE="simulation_results/sweep_results_dt_${TIMESTAMP}.txt"
+OUTPUT_FILE="simulation_results/sweep_results_dt_${TIMESTAMP}_ORDER_${INTERP_ORDER}.txt"
 
 # Header for the output file
 echo "=== Parameter Sweep Results ===" > $OUTPUT_FILE
@@ -24,7 +24,7 @@ echo "Sweeping dt from 2^-1 to 2^-10" >> $OUTPUT_FILE
 echo "==============================" >> $OUTPUT_FILE
 
 # Loop over dt values
-for i in {1..10}; do
+for i in {1..14}; do
     dt=$(awk "BEGIN {print 2^-$i}")
     echo "Running simulation with dt = $dt (2^-$i)"
     
