@@ -40,7 +40,7 @@ def potential_bspline(q, dq, order):
         w1 = 0.5 * (-2.0 * q_grid_frac**2 + 2.0 * q_grid_frac + 1.0)
         w2 = 0.5 * q_grid_frac**2
 
-        q_grid_idx +=0.5 # Quadratic B-spline grid is offset by half a grid point
+        q_grid_idx += 0.5 # Quadratic B-spline grid is offset by half a grid point
         return (w0 * V((q_grid_idx - 1) * dq) + 
                 w1 * V(q_grid_idx * dq) + 
                 w2 * V((q_grid_idx + 1) * dq))
