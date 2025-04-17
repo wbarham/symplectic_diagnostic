@@ -7,4 +7,4 @@ This repository contains a diagnostic tool to verify the symplecticity of time-a
 Install the required Python packages:
 
 ```bash
-pip install numpy numba matplotlib scipy pyfftw tbb
+pip install numpy numba matplotlib scipy pyfftw
