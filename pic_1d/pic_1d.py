@@ -16,6 +16,140 @@ from b_splines import (
     binary_filter
 )
 
+class PICSimulation:
+    """
+    Class for 1D Plasma PIC Simulation.
+    Handles only data and stepping.
+    """
+
+    def __init__(self, Np, Nx, dt, boxsize, n0, 
+                 initial_pos, initial_vel, 
+                 order_time=2, order_space=2, filter=0,
+                 symplectic=True, verbose=False):
+        
+        # Simulation parameters
+        self.Np = Np
+        self.Nx = Nx
+        self.boxsize = boxsize
+        self.n0 = n0
+        self.dt = dt
+
+        # Particle weight
+        self.w = self.n0 * self.Nx / self.Np
+
+        # Choose time integration method
+        if order_time == 1:
+            self.step = self.lie_trotter_step if symplectic else self.euler_step
+        elif order_time == 2:
+            if symplectic:
+                self.step = self.strang_step
+            else:
+                self.x0 = np.zeros(Np)
+                self.v0 = np.zeros(Np)
+                self.force0 = np.zeros(Np)
+                self.step = self.rk2_step
+
+        # Set up filtering if needed
+        self.filter_num = filter
+        if filter:
+            self.binary_filter = binary_filter(Nx)
+
+        # Grid operators
+        self.Lap = construct_laplacian(boxsize, Nx, order_space)
+        self.dx = boxsize / Nx
+        self.order_space = order_space
+
+        if order_space == 1:
+            self.p2g = p2g_B1_par
+            self.g2p = g2p_dB1_par
+            self.M   = sp.eye(Nx)
+        elif order_space == 2:
+            self.p2g = p2g_B2_par
+            self.g2p = g2p_dB2_par
+            self.M   = construct_M_linear(Nx)
+        elif order_space == 3:
+            self.p2g = p2g_B3_par
+            self.g2p = g2p_dB3_par
+            self.M   = construct_M_quadratic(Nx)
+        else:
+            raise ValueError(f"Invalid interpolation order: {order_space}")
+        
+        # Initialize particle data
+        self.initialize(initial_pos, initial_vel)
+
+        if verbose:
+            vmax = np.max(np.abs(self.vel))
+            print(f"CFL condition: {vmax * self.dt / self.dx} (should be < 1)")
+
+    def initialize(self, pos, vel):
+        if pos is not None:
+            self.pos = np.copy(pos)
+            self.density = np.zeros(self.Nx)
+            self.phi     = np.zeros(self.Nx)
+            self.force   = np.zeros(self.Np)
+            self.compute_charge_density()
+            self.compute_force()
+        if vel is not None:
+            self.vel = np.copy(vel)
+        self.t = 0
+
+    def compute_charge_density(self):
+        self.p2g(self.pos, self.density, self.dx)
+        self.density *= self.w
+
+        if self.filter_num > 0:
+            for i in range(self.filter_num):
+                self.n = self.binary_filter @ self.n
+
+    def compute_force(self):
+        self.compute_charge_density()
+        self.phi = spsolve(self.Lap, self.density - self.n0, permc_spec="MMD_AT_PLUS_A")
+        self.phi -= np.mean(self.phi)
+        self.g2p(self.pos, self.phi, self.force, self.dx)
+        self.force *= -1
+
+    def euler_step(self):
+        self.compute_force()
+        self.pos = np.mod(self.pos + self.vel * self.dt, self.boxsize)
+        self.vel += self.force * self.dt
+        self.t += self.dt
+
+    def lie_trotter_step(self):
+        self.vel += self.force * self.dt
+        self.pos = np.mod(self.pos + self.vel * self.dt, self.boxsize)
+        self.compute_force()
+        self.t += self.dt
+
+    def rk2_step(self):
+        self.compute_force()
+        self.x0[:] = self.pos
+        self.v0[:] = self.vel
+        self.force0[:] = self.force
+
+        self.pos = np.mod(self.pos + self.vel * self.dt, self.boxsize)
+        self.vel += self.force * self.dt
+        self.compute_force()
+
+        self.pos = np.mod(self.x0 + 0.5 * self.dt * (self.v0 + self.vel), self.boxsize)
+        self.vel = self.v0 + 0.5 * self.dt * (self.force0 + self.force)
+        self.t += self.dt
+
+    def strang_step(self):
+        self.vel += 0.5 * self.force * self.dt
+        self.pos = np.mod(self.pos + self.vel * self.dt, self.boxsize)
+        self.compute_force()
+        self.vel += 0.5 * self.force * self.dt
+        self.t += self.dt
+
+    def compute_energy(self):
+        KE = 0.5 * self.w * np.sum(self.vel**2)
+        EE = 0.5 * self.phi.T @ self.density
+        return KE, EE
+    
+"""
+Initialization functions for Landau and Two-stream simulations
+"""
+
 def two_stream_IC(N, boxsize, vb, vth, A, seed=None):
     """
     This function generates particle positions and velocities for 
@@ -57,7 +191,7 @@ def landau_IC(N, boxsize, vth, A, k, seed=None):
         N (int): Number of particles.
         boxsize (float): Size of the simulation domain.
         vth (float): Thermal velocity.
-        alpha (float): Amplitude of density perturbation.
+        A (float): Amplitude of density perturbation.
         k (int): Wavenumber of the perturbation.
         seed (int, optional): Random seed.
 
@@ -84,64 +218,13 @@ def landau_IC(N, boxsize, vth, A, k, seed=None):
 
     return pos, vel
 
-# Define the plotting function
-def two_stream_plot(pos, vel, boxsize, n, phi, ax):
+"""
+Helper function for plotting
+"""
+
+def phase_space_plot(pos, vel, boxsize, n, phi, ax, mode="landau"):
     """
-    Plot the phase space distribution of particles in a two-stream instability 
-    simulation, and also the charge density.
-
-    Parameters:
-    pos (ndarray): Array of particle positions.
-    vel (ndarray): Array of particle velocities.
-    boxsize (float): Size of the simulation box.
-    Nh (int): Number of particles in one of the streams.
-    n (ndarray): Charge density array.
-    phi (ndarray): Potential array.
-    E (ndarray): Electric field array.
-    ax1 (matplotlib.axes.Axes): Matplotlib Axes object for the phase space plot.
-    ax2 (matplotlib.axes.Axes): Matplotlib Axes object for the charge density plot.
-    """
-    # Clear the previous plots
-    ax[0].cla()
-    ax[1].cla()
-    ax[2].cla()
-
-    Nh = int(len(pos) / 2)
-
-    # Phase space plot for two-stream particles
-    ax[0].scatter(pos[0:Nh], vel[0:Nh], s=0.4, color='blue', alpha=0.5)
-    ax[0].scatter(pos[Nh:], vel[Nh:], s=0.4, color='red', alpha=0.5)
-    ax[0].set_title("Phase Space Distribution")
-    ax[0].set_xlabel(r'Position ($x$)')
-    ax[0].set_ylabel(r'Velocity ($v$)')
-    #ax[0].axis([0, boxsize, np.min(vel), np.max(vel)])
-    ax[0].axis([0, boxsize, -8, 8])
-
-    # Charge density plot
-    ax[1].plot(np.linspace(0, boxsize, len(n)), n, color='green')
-    ax[1].set_title("Charge Density")
-    ax[1].set_xlabel(r'Position ($x$)')
-    ax[1].set_ylabel(r'Density ($\rho$)')
-    ax[1].grid(True)
-    #ax[1].axis([0, boxsize, np.min(n) - 1, np.max(n) + 1])
-    ax[1].axis([0, boxsize, 0, 2])
-
-    # Electric potential plot
-    ax[2].plot(np.linspace(0, boxsize, len(phi)), phi - np.mean(phi), color='blue')
-    ax[2].set_title("Electric Potential")
-    ax[2].set_xlabel(r'Position ($x$)')
-    ax[2].set_ylabel(r'Potential ($\phi$)')
-    ax[2].grid(True)
-    #ax[2].axis([0, boxsize, np.min(phi - np.mean(phi)) - 1, 
-    #              np.max(phi - np.mean(phi)) + 1])
-    ax[2].axis([0, boxsize, -16, 16])
-
-    #plt.pause(0.001)
-
-def landau_plot(pos, vel, boxsize, n, phi, ax):
-    """
-    Plot the phase space distribution of particles in a Landau damping simulation,
-    and also the charge density, electric potential, and electric field.
+    General plot function for phase space, charge density, and electric potential.
 
     Parameters:
     pos (ndarray): Array of particle positions.
@@ -149,244 +232,145 @@ def landau_plot(pos, vel, boxsize, n, phi, ax):
     boxsize (float): Size of the simulation box.
     n (ndarray): Charge density array.
     phi (ndarray): Electric potential array.
-    E (ndarray): Electric field array.
     ax (ndarray): Array of Matplotlib Axes objects for the plots.
+    mode (str): "landau" or "two-stream" to determine phase space plotting style.
     """
-    # Clear the previous plots
-    ax[0].cla()
-    ax[1].cla()
-    ax[2].cla()
+    # Clear previous plots
+    for axis in ax:
+        axis.cla()
 
-    # Phase space plot for Landau damping particles
-    ax[0].scatter(pos, vel, s=0.4, color='blue', alpha=0.5)
+    # Phase space plot
+    if mode == "two-stream":
+        Nh = int(len(pos) / 2)
+        ax[0].scatter(pos[0:Nh], vel[0:Nh], s=0.4, color='blue', alpha=0.5)
+        ax[0].scatter(pos[Nh:], vel[Nh:], s=0.4, color='red', alpha=0.5)
+        ax[0].axis([0, boxsize, -8, 8])
+    else:  # default to "landau"
+        ax[0].scatter(pos, vel, s=0.4, color='blue', alpha=0.5)
+        ax[0].axis([0, boxsize, -10, 10])
+
     ax[0].set_title("Phase Space Distribution")
     ax[0].set_xlabel(r'Position ($x$)')
     ax[0].set_ylabel(r'Velocity ($v$)')
-    #ax[0].axis([0, boxsize, np.min(vel), np.max(vel)])
-    ax[0].axis([0, boxsize, -10, 10])
 
     # Charge density plot
-    ax[1].plot(np.linspace(0, boxsize, len(n)), n, color='green')
+    x = np.linspace(0, boxsize, len(n))
+    ax[1].plot(x, n, color='green')
     ax[1].set_title("Charge Density")
     ax[1].set_xlabel(r'Position ($x$)')
     ax[1].set_ylabel(r'Density ($\rho$)')
     ax[1].grid(True)
-    #ax[1].axis([0, boxsize, np.min(n) - 1, np.max(n) + 1])
     ax[1].axis([0, boxsize, 0, 2])
 
     # Electric potential plot
-    ax[2].plot(np.linspace(0, boxsize, len(phi)), phi - np.mean(phi), color='blue')
+    phi_centered = phi - np.mean(phi)
+    ax[2].plot(x, phi_centered, color='blue')
     ax[2].set_title("Electric Potential")
     ax[2].set_xlabel(r'Position ($x$)')
     ax[2].set_ylabel(r'Potential ($\phi$)')
     ax[2].grid(True)
-    #ax[2].axis([0, boxsize, np.min(phi - np.mean(phi)) - 1, 
-    #              np.max(phi - np.mean(phi)) + 1])
-    ax[2].axis([0, boxsize, -20, 20])
 
-    #plt.pause(0.001)
+    if mode == "two-stream":
+        ax[2].axis([0, boxsize, -16, 16])
+    else:
+        ax[2].axis([0, boxsize, -20, 20])
 
-class PICSimulation:
+    plt.tight_layout()
+
+def plot_energy(time_array, energy_data, save_path=None):
     """
-    Class for 1D Plasma PIC Simulation with Cubic B-Spline Interpolation
+    Plot kinetic, electrostatic, and total energy evolution, along with the relative error.
+
+    Parameters:
+    - time_array (ndarray): Array of time points.
+    - energy_data (dict): Dictionary containing "KE", "EE", "total_energy", and "total_charge" arrays.
+    - save_path (str, optional): If provided, path to save the plot image.
+    """
+    KE = energy_data["KE"]
+    EE = energy_data["EE"]
+    total_energy = energy_data["total_energy"]
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4), dpi=80)
+
+    # Energy evolution
+    ax1.plot(time_array, KE, label="Kinetic Energy")
+    ax1.plot(time_array, EE, label="Electrostatic Energy")
+    ax1.plot(time_array, total_energy, label="Total Energy")
+    ax1.set_xlabel("Time")
+    ax1.set_ylabel("Energy")
+    ax1.legend()
+    ax1.set_title("Energy Evolution")
+    ax1.grid()
+
+    # Relative energy error
+    relative_error = np.abs((total_energy - total_energy[0]) / total_energy[0])
+    ax2.plot(time_array, relative_error)
+    ax2.set_xlabel("Time")
+    ax2.set_ylabel("Relative Error")
+    ax2.set_title("Relative Error of Total Energy")
+    ax2.grid()
+
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=240)
+    plt.show()
+
+"""
+Helper function for running the simulation
+"""
+
+def run_simulation(sim: PICSimulation, nsteps=2, plot_mode=None, verbose=True):
+    """
+    Run the simulation using the provided PICSimulation object.
+
+    Parameters:
+    - sim (PICSimulation): The simulation object.
+    - nsteps (int): Number of time steps to simulate.
+    - plot_function (function): Optional function to plot the current state.
+    - make_plots (bool): Whether to update plots during the run.
+    - verbose (bool): Print step information.
     """
 
-    def __init__(self, Np, Nx, nsteps, dt, boxsize, n0, 
-                 initial_pos, initial_vel, 
-                 order_time=2, order_space=2, filter=0,
-                 make_plots=True, make_movie=False, symplectic=True, 
-                 verbose=False, plot_function=None):
-        
-        # Store simulation parameters
-        self.Np = Np
-        self.Nx = Nx
-        self.t = 0
-        self.dt = dt
-        self.nsteps = nsteps
-        self.tEnd = dt * nsteps
-        self.boxsize = boxsize
-        self.n0 = n0
-        self.make_plots = make_plots
-        self.make_movie = make_movie
-        self.plot_function = plot_function
+    if plot_mode: # Make plot if a mode is specified
+        fig, ax = plt.subplots(1, 3, figsize=(12, 4), dpi=80)
 
-        # Initialize position and velocity
-        self.pos = initial_pos
-        self.vel = initial_vel
+    energy_kinetic = []
+    energy_electrostatic = []
+    total_energy = []
+    total_charge = []
 
-        # Weight on each particle
-        self.w = self.n0 * self.Nx / self.Np
+    # Save initial energy and charge history
+    KE, EE = sim.compute_energy()
+    energy_kinetic.append(KE)
+    energy_electrostatic.append(EE)
+    total_energy.append(KE + EE)
+    total_charge.append(np.sum(sim.density) - sim.n0)
 
-        # Set up time integration
-        if order_time == 1:
-            if symplectic:
-                self.step = self.lie_trotter_step
-            else:
-                self.step = self.euler_step
-        elif order_time == 2:
-            if symplectic:
-                self.step = self.strang_step
-            else:
-                self.x0   = np.zeros(Np)
-                self.v0   = np.zeros(Np)
-                self.force0 = np.zeros(Np)
-                self.step = self.rk2_step
-
-        # Set up filtering
-        self.filter_num = filter
-        if filter:
-            self.binary_filter = binary_filter(Nx)
-
-        # Set grid operators
-        self.Lap = construct_laplacian(boxsize, Nx, order_space)
-        self.dx = boxsize / Nx
-        self.order_space = order_space
-        if order_space == 1:
-            self.p2g = p2g_B1_par
-            self.g2p = g2p_dB1_par
-            self.M   = sp.eye(Nx)
-        elif order_space == 2:
-            self.p2g = p2g_B2_par
-            self.g2p = g2p_dB2_par
-            self.M   = construct_M_linear(Nx)
-        elif order_space == 3:
-            self.p2g = p2g_B3_par
-            self.g2p = g2p_dB3_par
-            self.M   = construct_M_quadratic(Nx)
-        else:
-            raise ValueError(f"Invalid interpolation order: {order_space}")
-
-        # Initialize charge density, electric potential, and force
-        self.density = np.zeros(Nx)
-        self.phi     = np.zeros(Nx)
-        self.force   = np.zeros(Np)
-        self.compute_charge_density()
-        self.compute_force()
-
+    for i in range(nsteps):
         if verbose:
-            self.vmax = np.max(np.abs(self.vel))
-            print(f"CFL condition: {self.vmax * self.dt / self.dx} (must be < 1)")
+            print(f"Step {i+1} / {nsteps}")
+        sim.step()
 
-    def compute_charge_density(self):
-        self.p2g(self.pos, self.density, self.dx)
-        self.density *= self.w
+        # Save energy and charge history
+        KE, EE = sim.compute_energy()
+        energy_kinetic.append(KE)
+        energy_electrostatic.append(EE)
+        total_energy.append(KE + EE)
+        total_charge.append(np.sum(sim.density) - sim.n0)
 
-    def compute_force(self):
-        self.compute_charge_density()
-        self.phi = spsolve(self.Lap, self.density - self.n0, permc_spec="MMD_AT_PLUS_A")
-        self.phi -= np.mean(self.phi)
-        self.g2p(self.pos, self.phi, self.force, self.dx)
-        self.force *= -1
+        # Plot if needed
+        if plot_mode:
+            phase_space_plot(sim.pos, sim.vel, sim.boxsize, 
+                          sim.density, sim.phi, ax, mode=plot_mode)
+            plt.pause(0.001)
 
-    def euler_step(self):
-        self.compute_force()
-        self.pos = np.mod(self.pos + self.vel * self.dt, self.boxsize)
-        self.vel += self.force * self.dt
-        self.t += self.dt
-
-    def lie_trotter_step(self):
-        self.vel += self.force * self.dt
-        self.pos = np.mod(self.pos + self.vel * self.dt, self.boxsize)
-        self.compute_force()
-        self.t += self.dt
-
-    def rk2_step(self):
-        # Store initial values
-        self.compute_force()
-        self.x0[:]   = self.pos
-        self.v0[:]   = self.vel
-        self.force0[:] = self.force
-
-        # Euler step for intermediate result
-        self.pos = np.mod(self.pos + self.vel * self.dt, self.boxsize)
-        self.vel += self.force * self.dt
-        self.compute_force()
-
-        # Final update using RK2
-        self.pos = np.mod(self.x0 + 0.5 * self.dt * (self.v0 + self.vel), self.boxsize)
-        self.vel = self.v0 + 0.5 * self.dt * (self.force0 + self.force )
-        self.t  += self.dt
-
-    def strang_step(self):
-        self.vel += 0.5 * self.force * self.dt
-        self.pos = np.mod(self.pos + self.vel * self.dt, self.boxsize)
-        self.compute_force()
-        self.vel += 0.5 * self.force * self.dt
-        self.t += self.dt
-
-    def compute_energy(self):
-        KE = 0.5 * self.w * np.sum(self.vel**2)
-        EE = 0.5 * self.phi.T @ self.density
-        return KE, EE
-
-    def run(self):
-        Nt = int(np.ceil(self.tEnd / self.dt))
-
-        if self.make_plots and self.plot_function:
-            fig, ax = plt.subplots(1, 3, dpi=80)
-
-        self.energy_kinetic = []
-        self.energy_electrostatic = []
-        self.total_energy = []
-        self.total_charge = []
-
-        for i in range(Nt):
-            print(f"Step {i} of {Nt}")
-            self.step()
-
-            KE, EE = self.compute_energy()
-            self.energy_kinetic.append(KE)
-            self.energy_electrostatic.append(EE)
-            self.total_energy.append(KE + EE)
-            self.total_charge.append(np.sum(self.density))
-
-            if self.make_movie and self.plot_function:
-                self.plot_function(self.pos, self.vel, self.boxsize, self.density,
-                                   self.phi, ax)
-                plt.tight_layout()
-                plt.xlabel('x')
-                plt.ylabel('v')
-                plt.savefig(f'plots_movie/pic{i}.png', dpi=240)
-
-        if self.make_plots and self.plot_function:
-            plt.tight_layout()
-            self.plot_function(self.pos, self.vel, self.boxsize, self.density, 
-                               self.phi, ax)
-            plt.xlabel('x')
-            plt.ylabel('v')
-            plt.show()
-
-        if self.make_plots:
-            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4), dpi=80)
-
-            # Plot energies over time on the first subplot (ax1)
-            ax1.plot(np.arange(Nt) * self.dt, self.energy_kinetic, label="Kinetic Energy")
-            ax1.plot(np.arange(Nt) * self.dt, self.energy_electrostatic, 
-                     label="Electrostatic Energy")
-            ax1.plot(np.arange(Nt) * self.dt, self.total_energy, label="Total Energy")
-            ax1.set_xlabel("Time")
-            ax1.set_ylabel("Energy")
-            ax1.legend()
-            ax1.set_title("Energy Evolution")
-            ax1.grid()
-
-            # Plot relative error of total energy on the second subplot (ax2)
-            ax2.plot(np.arange(Nt) * self.dt, abs((np.array(self.total_energy) \
-                                                   - self.total_energy[0]) \
-                                                  / self.total_energy[0]))
-            ax2.set_xlabel("Time")
-            ax2.set_ylabel("Relative Error")
-            ax2.set_title("Relative Error of Total Energy")
-            ax2.grid()
-
-            # Adjust layout to avoid overlap
-            plt.tight_layout()
-
-            # Save the combined plot as an image
-            plt.savefig(f"energy_plots_order_{self.order_space}.png", dpi=240)
-
-            # Show the plot
-            plt.show()
+    return {
+        "KE": np.array(energy_kinetic),
+        "EE": np.array(energy_electrostatic),
+        "total_energy": np.array(total_energy),
+        "total_charge": np.array(total_charge)
+    }
 
 # Example run
 if __name__ == "__main__":
@@ -404,15 +388,14 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="1D Plasma PIC Simulation")
     # Discretization parameters
-    parser.add_argument('--Np', type=int, default=100000, help="Number of particles")
-    parser.add_argument('--Nx', type=int, default=150, help="Number of mesh cells")
-    parser.add_argument('--nsteps', type=int, default=1000, help="Number of simulation steps")
-    parser.add_argument('--dt', type=float, default=0.05, help="Time step")
+    parser.add_argument('--Np', type=int, default=10000, help="Number of particles")
+    parser.add_argument('--Nx', type=int, default=200, help="Number of mesh cells")
     parser.add_argument('--boxsize', type=float, default=50.0, help="Periodic domain size")
+    # Time-stepping parameters
+    parser.add_argument('--nsteps', type=int, default=1000, help="Number of simulation steps")
+    parser.add_argument('--dt', type=float, default=0.01, help="Time step")
     parser.add_argument('--symplectic', type=str2bool, default="True", help="Enable symplectic integration")
     # Display parameters
-    parser.add_argument('--make_plots', type=str2bool, default="True", help="Enable real-time plotting")
-    parser.add_argument('--make_movie', type=str2bool, default="False", help="Enable movie making")
     parser.add_argument('--verbose', type=str2bool, default="False", help="Enable verbose output")
     # Initial data parameters
     parser.add_argument('--IC', type=str, default="two_stream", help="Initial condition (two_stream or landau)")
@@ -422,21 +405,19 @@ if __name__ == "__main__":
     parser.add_argument('--A', type=float, default=0.5, help="Perturbation amplitude")
     parser.add_argument('--k', type=int, default=1, help="Wavenumber of perturbation (for Landau IC)")
     parser.add_argument('--seed', type=int, default=42, help="Random seed")
+    # Order parameters
     parser.add_argument('--order_time', type=int, default=2, help="Time-stepper order")
     parser.add_argument('--order_space', type=int, default=2, help="Spatial interpolation order (must be 2 or 3)")
     parser.add_argument('--filter', type=int, default=0, help="Number of times to apply filter")
 
     args = parser.parse_args()
 
-    pos, vel = None, None
-    plot_function = None
+    np.random.seed(args.seed)
 
     if args.IC == "two_stream":
         pos, vel = two_stream_IC(args.Np, args.boxsize, args.vb, args.vth, args.A, seed=args.seed)
-        plot_function = two_stream_plot
     elif args.IC == "landau":
         pos, vel = landau_IC(args.Np, args.boxsize, args.vth, args.A, args.k, seed=args.seed)
-        plot_function = landau_plot
     else:
         raise ValueError("Invalid initial condition specified.")
 
@@ -446,12 +427,22 @@ if __name__ == "__main__":
 
     # Initialize the simulation
     sim = PICSimulation(
-        Np=args.Np, Nx=args.Nx, nsteps=args.nsteps, dt=args.dt, boxsize=args.boxsize, 
-        n0=args.n0, initial_pos=pos, initial_vel=vel, 
-        order_time=args.order_time, order_space=args.order_space, filter=args.filter,
-        make_plots=bool(args.make_plots), make_movie=bool(args.make_movie),
-        symplectic=bool(args.symplectic), 
-        verbose=bool(args.verbose), plot_function=plot_function
+        Np=args.Np, Nx=args.Nx, dt=args.dt, 
+        boxsize=args.boxsize, n0=args.n0, 
+        initial_pos=pos, initial_vel=vel, 
+        order_time=args.order_time, order_space=args.order_space, 
+        filter=args.filter,
+        symplectic=args.symplectic, 
+        verbose=args.verbose 
     )
 
-    sim.run()
+    # Run the simulation and plot
+    plot_mode = None
+    # plot_mode = args.IC
+    results = run_simulation(sim, nsteps=args.nsteps, plot_mode=plot_mode, 
+                             verbose=True)
+    time_array = np.arange(len(results["KE"])) * sim.dt
+    save_path = None
+    # save_path = f"energy_plot_order_{args.order_space}.png"
+    plot_energy(time_array, results, 
+                save_path=save_path)
