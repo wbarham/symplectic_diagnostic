@@ -99,7 +99,7 @@ class PICSimulation:
 
         if self.filter_num > 0:
             for i in range(self.filter_num):
-                self.n = self.binary_filter @ self.n
+                self.n = self.binary_filter @ self.density
 
     def compute_force(self):
         self.compute_charge_density()
