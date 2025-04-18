@@ -17,7 +17,7 @@ mkdir -p simulation_results
 
 # Generate timestamp for unique filename
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-OUTPUT_FILE="simulation_results/sweep_dt_${TIMESTAMP}_ORDER_${INTERP_ORDER}_FILTER_${FILTER}_M_${N_TRAJ}.txt"
+OUTPUT_FILE="simulation_results/sweep_dt_${TIMESTAMP}_ORDER_${INTERP_ORDER}_FILTER_${FILTER}_IC_${IC}_M_${N_TRAJ}.txt"
 
 # Header for the output file
 echo "=== Parameter Sweep Results ===" > "$OUTPUT_FILE"
