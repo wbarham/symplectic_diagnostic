@@ -10,7 +10,7 @@ parent_dir = str(Path(__file__).resolve().parent.parent)
 if parent_dir not in sys.path:
     sys.path.append(parent_dir)
 from pic_1d import PICSimulation, landau_IC, two_stream_IC
-from loop_integrals import LoopIntegral
+from loop_integrals_par import LoopIntegral
 
 def str2bool(v):
     if isinstance(v, bool):
@@ -21,6 +21,20 @@ def str2bool(v):
         return False
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
+    
+@njit(parallel=True)
+def generate_loop(pos, vel, rad, boxsize, Np, Ntheta):
+    
+    loop_q = np.zeros((Np, Ntheta), dtype=np.float64)
+    loop_p = np.zeros((Np, Ntheta), dtype=np.float64)
+
+    for i in prange(Np):
+        for j in prange(Ntheta):
+            theta = 2 * np.pi * j / Ntheta  # Angle for the current point
+            loop_q[i, j] = np.mod(pos[i] + rad * np.sin(theta), boxsize)  
+            loop_p[i, j] = vel[i] + rad * np.cos(theta) 
+
+    return loop_q, loop_p
 
 def initialize_system(**params):
     """Initialize system with given parameters"""
@@ -42,17 +56,9 @@ def initialize_system(**params):
         pos, vel = landau_IC(Np, boxsize, vth, A, k, seed=seed)
     else:
         raise ValueError("Invalid initial condition specified.")
-    
-    # Define (q,p) coordinates in loop
-    loop_q = np.zeros((Np, Ntheta), dtype=np.float64)
-    loop_p = np.zeros((Np, Ntheta), dtype=np.float64)
 
     # Fill loop
-    for i in range(Np):  # Iterate over each particle
-        for j in range(Ntheta):  # Iterate over each point on the loop
-            theta = 2 * np.pi * j / Ntheta  # Angle for the current point
-            loop_q[i, j] = np.mod(pos[i] + rad * np.sin(theta), boxsize)  
-            loop_p[i, j] = vel[i] + rad * np.cos(theta) 
+    loop_q, loop_p = generate_loop(pos, vel, rad, boxsize, Np, Ntheta)
 
     return loop_q, loop_p
 

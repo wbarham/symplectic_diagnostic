@@ -1,15 +1,16 @@
 #!/bin/bash
 
 # Check for required arguments
-if [ "$#" -ne 3 ]; then
-    echo "Usage: $0 <interpolation_order> <filter> <N_traj>"
-    echo "Example: $0 2 0 1024"
+if [ "$#" -ne 4 ]; then
+    echo "Usage: $0 <interpolation_order> <filter> <IC> <N_traj>"
+    echo "Example: $0 2 0 landau 4096"
     exit 1
 fi
 
 INTERP_ORDER=$1
 FILTER=$2
-N_TRAJ=$3
+IC=$3
+N_TRAJ=$4
 
 # Create output directory if it doesn't exist
 mkdir -p simulation_results
@@ -32,7 +33,7 @@ for i in {1..10}; do
     # Run simulation and append to output file
     echo -e "\n=== dt = $dt ===" >> "$OUTPUT_FILE"
     python simulate.py --dt "$dt" --order_space "$INTERP_ORDER" \
-        --filter "$FILTER" --Ntheta "$N_TRAJ" >> "$OUTPUT_FILE"
+        --filter "$FILTER" --IC "$IC" --Ntheta "$N_TRAJ" >> "$OUTPUT_FILE"
     
     # Progress indicator
     echo "Completed dt = 2^-$i"

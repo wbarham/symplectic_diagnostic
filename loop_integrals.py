@@ -47,3 +47,38 @@ class LoopIntegral:
         # Compute loop integral using optimized summation
         loop_integral = np.sum(p * q_prime) * self.dtheta
         return loop_integral
+    
+# Main test
+if __name__ == "__main__":
+    # Initialize parameters
+    N = 4096  # Number of grid points in the theta direction
+    D = 100    # Number of dimensions (number of loops)
+
+    # Random initialization of q and p
+    q0 = np.random.random(D)  # q with shape (D, N)
+    p0 = np.random.random(D)  # p with shape (D, N)
+
+    # Vary q and p periodically to form D distinct loops
+    q = np.zeros((D, N))
+    p = np.zeros((D, N))
+    for i in range(D):
+        for j in range(N):
+            q[i, j] = q0[i] + np.sin(2 * np.pi * j / N) 
+            p[i, j] = p0[i] + np.cos(2 * np.pi * j / N) 
+
+    # Create LoopIntegral instance
+    loop_integral_calculator = LoopIntegral(N)
+
+    # Compute the loop integral
+    computed_loop_integral = loop_integral_calculator.compute(q, p)
+
+    # Expected value: sum of D integrals of cos^2(theta) over [0, 2pi] which is 0.5 per loop
+    expected_value = 0.5 * D
+
+    # Calculate the relative error
+    relative_error = np.abs(computed_loop_integral - expected_value) / expected_value
+
+    # Print results
+    print(f"Computed Loop Integral: {computed_loop_integral}")
+    print(f"Expected Loop Integral: {expected_value}")
+    print(f"Relative Error: {relative_error}")
