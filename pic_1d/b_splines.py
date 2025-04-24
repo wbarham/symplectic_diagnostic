@@ -94,17 +94,19 @@ def p2g_B2(pos, vec, dx):
     for i in range(len(pos)):  # nb.prange enables parallel for loop
 
         # Obtain the central grid point
-        grid_idx = int(np.floor(pos[i] / dx - 0.5))  
+        grid_idx = int(np.floor(pos[i] / dx))  
         # offset from center
-        r = (pos[i] - (grid_idx + 1) * dx) / dx
+        r = (pos[i] - grid_idx * dx) / dx
 
-        w0 = 1/6 * (3/2 - r)**2
-        w1 = 1/4 - r**2/3
-        w2 = 1/6 * (3/2 + r)**2
+        # Quadratic interpolation
+        w0 = 1/2 * (1 - r)**2
+        w1 = 1/2 + r - r**2
+        w2 = 1/2 * r**2
 
-        idx0 = grid_idx % Nx
-        idx1 = (grid_idx + 1) % Nx
-        idx2 = (grid_idx + 2) % Nx
+        # Indices
+        idx0 = (grid_idx - 1) % Nx
+        idx1 = (grid_idx + 0) % Nx
+        idx2 = (grid_idx + 1) % Nx
 
         vec[idx0] += w0
         vec[idx1] += w1
@@ -132,17 +134,19 @@ def p2g_B2_par(pos, vec, dx):
         thread_id = nb.get_thread_id()
 
         # Obtain the central grid point
-        grid_idx = int(np.floor(pos[i] / dx - 0.5))  
+        grid_idx = int(np.floor(pos[i] / dx))  
         # offset from center
-        r = (pos[i] - (grid_idx + 1) * dx) / dx
+        r = (pos[i] - grid_idx * dx) / dx
 
-        w0 = 1/6 * (3/2 - r)**2
-        w1 = 1/4 - r**2/3
-        w2 = 1/6 * (3/2 + r)**2
+        # Quadratic interpolation
+        w0 = 1/2 * (1 - r)**2
+        w1 = 1/2 + r - r**2
+        w2 = 1/2 * r**2
 
-        idx0 = grid_idx % Nx
-        idx1 = (grid_idx + 1) % Nx
-        idx2 = (grid_idx + 2) % Nx
+        # Indices
+        idx0 = (grid_idx - 1) % Nx
+        idx1 = (grid_idx + 0) % Nx
+        idx2 = (grid_idx + 1) % Nx
 
         thread_vecs[thread_id, idx0] += w0
         thread_vecs[thread_id, idx1] += w1
@@ -297,17 +301,17 @@ def g2p_dB2(pos, grid, val, dx):
     val[:] = 0
 
     for i in range(len(pos)):
-        # Centered grid point
-        grid_idx = int(np.floor(pos[i] / dx - 0.5))
-        r = (pos[i] - (grid_idx + 1) * dx) / dx
+        grid_idx = int(np.floor(pos[i] / dx))
+        r = (pos[i] - grid_idx * dx) / dx
 
-        dw0 = (-1.5 + r) / (3 * dx)
-        dw1 = - 2 * r / (3 * dx)
-        dw2 = (1.5 + r) / (3 * dx)
+        # Quadratic interpolation
+        dw0 = (r - 1) / dx
+        dw1 = (1 - 2 * r) / dx
+        dw2 = r / dx
 
-        idx0 = grid_idx % Nx
-        idx1 = (grid_idx + 1) % Nx
-        idx2 = (grid_idx + 2) % Nx
+        idx0 = (grid_idx - 1) % Nx
+        idx1 = (grid_idx + 0) % Nx
+        idx2 = (grid_idx + 1) % Nx
 
         val[i] += grid[idx0] * dw0 + grid[idx1] * dw1 + grid[idx2] * dw2
 
@@ -326,16 +330,17 @@ def g2p_dB2_par(pos, grid, val, dx):
     val[:] = 0
 
     for i in nb.prange(len(pos)):
-        grid_idx = int(np.floor(pos[i] / dx - 0.5))
-        r = (pos[i] - (grid_idx + 1) * dx) / dx
+        grid_idx = int(np.floor(pos[i] / dx))
+        r = (pos[i] - grid_idx * dx) / dx
 
-        dw0 = (-1.5 + r) / (3 * dx)
-        dw1 = - 2 * r / (3 * dx)
-        dw2 = (1.5 + r) / (3 * dx)
+        # Quadratic interpolation
+        dw0 = (r - 1) / dx
+        dw1 = (1 - 2 * r) / dx
+        dw2 = r / dx
 
-        idx0 = grid_idx % Nx
-        idx1 = (grid_idx + 1) % Nx
-        idx2 = (grid_idx + 2) % Nx
+        idx0 = (grid_idx - 1) % Nx
+        idx1 = (grid_idx + 0) % Nx
+        idx2 = (grid_idx + 1) % Nx
 
         val[i] += grid[idx0] * dw0 + grid[idx1] * dw1 + grid[idx2] * dw2
 
@@ -645,7 +650,7 @@ def test_full_force_calculation(order, serial=True, plotting=False):
     
     L  = 10.0
     A  = 0.75
-    Nx = 101
+    Nx = 51
     dx = L / Nx
     x_grid = np.linspace(0, L, Nx, endpoint=False)
 
@@ -764,7 +769,8 @@ def test_full_force_calculation(order, serial=True, plotting=False):
 
     print(f"Max error force:   {np.max(error)/np.max(force_exact(pos)):.3e}")
     print(f"L2  error force:   {np.linalg.norm(error) / np.linalg.norm(force_exact(pos)):.3e}")
-    
+    print("")
+
     # Optional: plot
     if plotting:
         plt.figure(figsize=(8, 4))
@@ -777,6 +783,7 @@ def test_full_force_calculation(order, serial=True, plotting=False):
         plt.show()
 
 if __name__ == "__main__":
+    plotting = True
     """
     test_p2g_deposition(1)
     test_p2g_deposition(1, serial=False)
@@ -791,9 +798,9 @@ if __name__ == "__main__":
     test_g2p_derivatives(3)
     test_g2p_derivatives(3, serial=False)
     """
-    test_full_force_calculation(1)
-    test_full_force_calculation(1, serial=False)
-    test_full_force_calculation(2)
-    test_full_force_calculation(2, serial=False)
-    test_full_force_calculation(3)
-    test_full_force_calculation(3, serial=False)
+    test_full_force_calculation(1, plotting=plotting)
+    test_full_force_calculation(1, serial=False, plotting=plotting)
+    test_full_force_calculation(2, plotting=plotting)
+    test_full_force_calculation(2, serial=False, plotting=plotting)
+    test_full_force_calculation(3, plotting=plotting)
+    test_full_force_calculation(3, serial=False, plotting=plotting)

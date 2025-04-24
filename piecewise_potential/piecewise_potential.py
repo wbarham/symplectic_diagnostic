@@ -180,7 +180,7 @@ def main():
     import matplotlib.pyplot as plt
 
     num_trajectories = 5     # Fewer trajectories for clearer visualization
-    num_gridpoints   = 101    # Number of grid points
+    num_gridpoints   = 25    # Number of grid points
     dt = 0.1                # Time step
     num_steps = 500          # Number of steps
     method = "strang"        # Set to "strang" or "rk2"

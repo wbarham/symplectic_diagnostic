@@ -37,7 +37,7 @@ def run_simulation(params):
     q_rk2, p_rk2 = initialize_system(**params)
     
     # Setup calculator
-    loop_integral = LoopIntegral(params['M'])
+    loop_integral = LoopIntegral(params['M'], period=2 * np.pi)
 
     # Exact integral
     exact_integral = 0.5 * params['rad']**2
@@ -70,9 +70,9 @@ def main():
     parser.add_argument('--p0', type=float, default=0.0, help='Initial p momentum')
     parser.add_argument('--rad', type=float, default=1.0, help='Initial radius')
     parser.add_argument('--M', type=int, default=1024, help='Number of trajectories')
-    parser.add_argument('--num_gridpoints', type=int, default=101, help='Number of grid points for interpolation')
+    parser.add_argument('--num_gridpoints', type=int, default=25, help='Number of grid points for interpolation')
     parser.add_argument('--interpolation_order', type=int, default=2, help='Interpolation order')
-    parser.add_argument('--dt', type=float, default=0.25, help='Time step size')
+    parser.add_argument('--dt', type=float, default=0.5, help='Time step size')
     args = parser.parse_args()
     
     # Convert args to dict
